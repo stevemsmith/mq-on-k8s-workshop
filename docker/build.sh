@@ -29,7 +29,7 @@ echo ">>> Building for linux/${TARGETARCH}"
 # 2. Base image
 # ---------------------------------------------------------------------------
 if [ "$TARGETARCH" = "amd64" ]; then
-  BASE_IMAGE="icr.io/ibm-messaging/mq:9.4.5.0"
+  BASE_IMAGE="icr.io/ibm-messaging/mq:9.4.5.0-r2"
   echo ">>> Using published base image: $BASE_IMAGE"
 else
   # arm64: build IBM's developer image locally.
