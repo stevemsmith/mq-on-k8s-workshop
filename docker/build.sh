@@ -38,9 +38,20 @@ else
     git clone -b v9.4.5.0-r2 --depth 1 https://github.com/ibm-messaging/mq-container.git
   fi
 
-  # "make build-devserver" downloads the MQ Advanced for Developers
-  # arm64 archive into mq-container/downloads/ (a ~500 MB tar.gz) and
-  # builds an image tagged ibm-mqadvanced-server-dev:<VERSION>-arm64.
+  # build-mq-prometheus.sh needs the raw MQ Advanced for Developers
+  # arm64 archive (to seed mq-metric-samples/MQINST/) regardless of
+  # whether the base image below is already cached, so make sure it's
+  # on disk even on a cache hit - otherwise a stale/missing
+  # downloads/ directory with a cached base image silently breaks the
+  # exporter build.
+  ARCHIVE="mq-container/downloads/9.4.5.0-IBM-MQ-Advanced-for-Developers-Non-Install-LinuxARM64.tar.gz"
+  if [ ! -f "$ARCHIVE" ]; then
+    echo ">>> Fetching MQ Advanced for Developers arm64 archive"
+    (cd mq-container && make "downloads/$(basename "$ARCHIVE")")
+  fi
+
+  # "make build-devserver" builds an image tagged
+  # ibm-mqadvanced-server-dev:<VERSION>-arm64 from the archive above.
   if ! docker image inspect "ibm-mqadvanced-server-dev:9.4.5.0-arm64" >/dev/null 2>&1 \
     && ! docker images --format '{{.Repository}}:{{.Tag}}' \
          | grep -qE '^ibm-mqadvanced-server-dev:.*-arm64$'; then

@@ -70,7 +70,12 @@ alongside so you can pick either style.
 
 1. Docker Desktop running, with **Kubernetes enabled** in
    Settings → Kubernetes. Confirm with `kubectl config current-context`
-   - it should print `docker-desktop`.
+   - it should print `docker-desktop`. If it prints something else
+     (a cloud cluster, `minikube`, etc.), switch to it:
+
+     ```bash
+     kubectl config use-context docker-desktop
+     ```
 2. `openssl`, `kubectl`, `git`, `bash`, and either `tofu` or `terraform`
    on your `PATH`.
 3. Roughly 4 GB of free RAM allocated to Docker Desktop.
