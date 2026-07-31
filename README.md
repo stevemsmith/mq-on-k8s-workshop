@@ -578,14 +578,25 @@ tr -d '\n' < iso20022/pacs.008-oversized.xml \
 > **Make shortcut:** `make put-pacs008-oversized`.
 
 This time the `MQPUT` itself fails - MQ never accepts the message onto
-`APP.OUT` in the first place, so there is nothing to browse. Because
-`kubectl exec -i` streams the pod's stdout straight back to your
-terminal, `amqsputc` reports the failure right there in the same
-command you just ran:
+`APP.OUT` in the first place. Because `kubectl exec -i` streams the
+pod's stdout straight back to your terminal, `amqsputc` reports the
+failure right there in the same command you just ran:
 
 ```
+Sample AMQSPUT0 start
+target queue is APP.IN
 MQPUT ended with reason code 2030
+Sample AMQSPUT0 end
 ```
+
+**Read that output carefully - it is easy to skim past.** The program
+still prints its normal "start" / "end" banner and, more importantly,
+`kubectl` still reports a **0 (success) exit code** for the whole
+command, because the C sample never turns the failed `MQPUT` into a
+nonzero process exit status. The only signal that anything went wrong
+is that one line in the middle: `MQPUT ended with reason code 2030`.
+This is itself a lesson - a supervising script that only checks `$?`
+would see this run as a clean success.
 
 Reason code `2030` is `MQRC_MSG_TOO_BIG_FOR_Q`: the message exceeds the
 target queue's `MAXMSGL`. (A message that instead exceeds the queue
@@ -595,9 +606,21 @@ only an alias, this check happens against `APP.OUT`'s attributes, not
 the alias's - reinforcing that an alias has no storage or limits of
 its own, it just resolves to the real queue.
 
-If you want to confirm it from the queue manager's own side too - the
-same log the Troubleshooting section points you to for CHLAUTH and
-cert failures - tail it while you retry the put:
+To prove nothing actually landed, browse `APP.OUT` right after:
+
+```bash
+kubectl -n mq exec -it mq-client -- amqsbcgc APP.OUT qm1
+```
+
+> **Make shortcut:** `make browse`.
+
+You should see `No more messages` (or only the messages from earlier
+steps, if any) - the oversized payload never made it onto the queue at
+all.
+
+If you want to confirm the rejection from the queue manager's own side
+too - the same log the Troubleshooting section points you to for
+CHLAUTH and cert failures - tail it while you retry the put:
 
 ```bash
 kubectl -n mq logs -f ibm-mq-0
