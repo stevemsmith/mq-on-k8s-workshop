@@ -618,13 +618,14 @@ You should see `No more messages` (or only the messages from earlier
 steps, if any) - the oversized payload never made it onto the queue at
 all.
 
-If you want to confirm the rejection from the queue manager's own side
-too - the same log the Troubleshooting section points you to for
-CHLAUTH and cert failures - tail it while you retry the put:
-
-```bash
-kubectl -n mq logs -f ibm-mq-0
-```
+Unlike a CHLAUTH or certificate rejection, this failure will **not**
+show up in the queue manager's own logs (`kubectl -n mq logs ibm-mq-0`
+or `AMQERR01.LOG` inside the pod) - `MQRC_MSG_TOO_BIG_FOR_Q` is an
+expected MQI return code handed straight back to the calling
+application on the `MQPUT` call, not a queue-manager-level error
+event, so there is nothing for the qmgr to log. The `amqsputc` output
+and the empty `APP.OUT` browse above are the only two places this
+failure is visible.
 
 **What just happened:** this is a queue manager-level rejection, not
 an application-level one - no consumer code ever ran and nothing
