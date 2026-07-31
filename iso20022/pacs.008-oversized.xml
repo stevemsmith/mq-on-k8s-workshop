@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+  <FIToFICstmrCdtTrf>
+    <GrpHdr>
+      <MsgId>MOOVDEVCON20260731-0003</MsgId>
+      <CreDtTm>2026-07-31T09:10:00Z</CreDtTm>
+      <NbOfTxs>1</NbOfTxs>
+      <SttlmInf>
+        <SttlmMtd>CLRG</SttlmMtd>
+        <ClrSys>
+          <Cd>FDN</Cd>
+        </ClrSys>
+      </SttlmInf>
+    </GrpHdr>
+    <CdtTrfTxInf>
+      <PmtId>
+        <InstrId>INSTR-0003</InstrId>
+        <EndToEndId>E2E-0003</EndToEndId>
+        <TxId>TX-0003</TxId>
+      </PmtId>
+      <IntrBkSttlmAmt Ccy="USD">125.00</IntrBkSttlmAmt>
+      <IntrBkSttlmDt>2026-07-31</IntrBkSttlmDt>
+      <ChrgBr>SLEV</ChrgBr>
+      <Dbtr>
+        <Nm>Moov Devcon Attendee</Nm>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <Othr>
+            <Id>123456789</Id>
+          </Othr>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <ClrSysMmbId>
+            <ClrSysId>
+              <Cd>USABA</Cd>
+            </ClrSysId>
+            <MmbId>021000021</MmbId>
+          </ClrSysMmbId>
+        </FinInstnId>
+      </DbtrAgt>
+      <CdtrAgt>
+        <FinInstnId>
+          <ClrSysMmbId>
+            <ClrSysId>
+              <Cd>USABA</Cd>
+            </ClrSysId>
+            <MmbId>091000019</MmbId>
+          </ClrSysMmbId>
+        </FinInstnId>
+      </CdtrAgt>
+      <Cdtr>
+        <Nm>IBM MQ Workshop Merchant</Nm>
+      </Cdtr>
+      <CdtrAcct>
+        <Id>
+          <Othr>
+            <Id>987654321</Id>
+          </Othr>
+        </Id>
+      </CdtrAcct>
+      <RmtInf>
+        <Ustrd>Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026; Invoice detail line referencing purchase order PO-2026-00042 for professional services rendered in July 2026;</Ustrd>
+      </RmtInf>
+    </CdtTrfTxInf>
+  </FIToFICstmrCdtTrf>
+</Document>

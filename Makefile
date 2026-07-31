@@ -140,9 +140,9 @@ put-pacs008: ## Put a real ISO 20022 pacs.008 credit-transfer message on APP.IN.
 	tr -d '\n' < iso20022/pacs.008-valid.xml \
 	  | $(KUBECTL) -n $(NAMESPACE) exec -i mq-client -- amqsputc APP.IN $(QMGR)
 
-.PHONY: put-pacs008-malformed
-put-pacs008-malformed: ## Put a deliberately malformed pacs.008 message on APP.IN.
-	tr -d '\n' < iso20022/pacs.008-malformed.xml \
+.PHONY: put-pacs008-oversized
+put-pacs008-oversized: ## Put a pacs.008 message that exceeds APP.OUT's MAXMSGL - MQ refuses the MQPUT.
+	tr -d '\n' < iso20022/pacs.008-oversized.xml \
 	  | $(KUBECTL) -n $(NAMESPACE) exec -i mq-client -- amqsputc APP.IN $(QMGR)
 
 .PHONY: loop

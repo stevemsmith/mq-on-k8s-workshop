@@ -26,7 +26,7 @@ publicly available **IBM MQ Advanced for Developers** image as a base.
 │   └── dashboards/        # Grafana dashboards loaded via ConfigMap
 ├── certs/                 # OpenSSL script that produces the TLS material
 ├── client/                # Pod manifest and CCDT used for the end-to-end test
-├── iso20022/              # Sample pacs.008 payment messages (valid + malformed)
+├── iso20022/              # Sample pacs.008 payment messages (valid + oversized)
 └── README.md
 ```
 
@@ -46,7 +46,7 @@ make put          # send one message on APP.IN
 make get          # destructively read from APP.OUT
 make loop         # keep a persistent connection sending 1 msg/sec (^C to stop)
 make put-pacs008            # send a real ISO 20022 pacs.008 credit transfer
-make put-pacs008-malformed  # send a deliberately broken pacs.008
+make put-pacs008-oversized  # send a pacs.008 that exceeds MAXMSGL - MQ rejects the MQPUT
 make grafana      # port-forward Grafana to http://localhost:3000
 make prometheus   # port-forward Prometheus to http://localhost:9090
 ```
@@ -275,7 +275,7 @@ The file is run once when the queue manager is created and sets up:
 | `APP.SVRCONN` | SVRCONN channel | Entry point for client applications; `SSLCAUTH(REQUIRED)` forces mutual TLS |
 | `CHLAUTH('APP.SVRCONN' SSLPEERMAP)` | Channel auth rule | Maps any client with `CN=mq-client` to the local user `app` |
 | `APP.IN` | Queue alias | What the application writes to |
-| `APP.OUT` | Local queue | What the application reads from; `APP.IN`'s alias target |
+| `APP.OUT` | Local queue | What the application reads from; `APP.IN`'s alias target. `MAXMSGL(4096)` caps how big a message it will accept - see Step 8 |
 | `AUTHREC` records | Authorisations | `app` gets `PUT` on `APP.IN`, `GET` on `APP.OUT`, plus `CONNECT` on the qmgr |
 | `MQPROMETHEUS` | Service | Starts `mq_prometheus.sh` so the exporter listens on `:9158` |
 
@@ -519,8 +519,10 @@ sends to move a credit transfer to the next institution in the chain.
 `iso20022/pacs.008-valid.xml` is a hand-built but structurally correct
 sample of that message: a group header, one credit transfer
 transaction, debtor/creditor parties, and the agents (banks) routing
-it. `iso20022/pacs.008-malformed.xml` is the same message with two
-realistic mistakes seeded in.
+it. `iso20022/pacs.008-oversized.xml` is the same message with a large
+remittance-detail block appended - it is still perfectly valid XML and
+a well-formed payment message, but it is too big for MQ to accept onto
+`APP.OUT`.
 
 ### Put the valid message
 
@@ -550,63 +552,63 @@ alias is doing the same job a payment gateway does when it hands a
 message off to the next hop without the sender needing to know the
 physical destination.
 
-### Put the malformed message
+### Put the oversized message
+
+`opentofu/config/mq.mqsc` sets `MAXMSGL(4096)` on `APP.OUT` - a stand-in
+for the message-size ceilings real payment networks enforce (RTP and
+FedNow both cap ISO 20022 message size). If you deployed before this
+limit was added, pick it up on the running queue manager:
 
 ```bash
-tr -d '\n' < iso20022/pacs.008-malformed.xml \
+make reload-mqsc
+```
+
+Now put a message that is well past that ceiling:
+
+```bash
+tr -d '\n' < iso20022/pacs.008-oversized.xml \
   | kubectl -n mq exec -i mq-client -- amqsputc APP.IN qm1
 ```
 
-> **Make shortcut:** `make put-pacs008-malformed`.
+> **Make shortcut:** `make put-pacs008-oversized`.
 
-MQ does not know or care what is inside the payload - it will accept
-and deliver this message exactly like the valid one. Browse it off
-`APP.OUT` to confirm it arrived intact:
+This time the `MQPUT` itself fails - MQ never accepts the message onto
+`APP.OUT` in the first place, so there is nothing to browse. Because
+`kubectl exec -i` streams the pod's stdout straight back to your
+terminal, `amqsputc` reports the failure right there in the same
+command you just ran:
 
-```bash
-kubectl -n mq exec -it mq-client -- amqsbcgc APP.OUT qm1
+```
+MQPUT ended with reason code 2030
 ```
 
-> **Make shortcut:** `make browse`.
+Reason code `2030` is `MQRC_MSG_TOO_BIG_FOR_Q`: the message exceeds the
+target queue's `MAXMSGL`. (A message that instead exceeds the queue
+*manager's* `MAXMSGL` - the ceiling every queue inherits by default -
+fails with `2031`, `MQRC_MSG_TOO_BIG_FOR_Q_MGR`.) Because `APP.IN` is
+only an alias, this check happens against `APP.OUT`'s attributes, not
+the alias's - reinforcing that an alias has no storage or limits of
+its own, it just resolves to the real queue.
 
-The bytes on the queue are identical to `iso20022/pacs.008-malformed.xml`,
-so the failure a downstream consumer would hit is easiest to reproduce
-by parsing that file directly - the same failure mode you'd see if a
-consumer app ran `xml.Unmarshal` (Go) or any other XML parser against
-the `MQGET`'d payload:
-
-```bash
-python3 -c "import xml.dom.minidom as m; m.parse('iso20022/pacs.008-malformed.xml')"
-```
-
-That raises `xml.parsers.expat.ExpatError: mismatched tag`. Diff the
-two files to see why:
+If you want to confirm it from the queue manager's own side too - the
+same log the Troubleshooting section points you to for CHLAUTH and
+cert failures - tail it while you retry the put:
 
 ```bash
-diff iso20022/pacs.008-valid.xml iso20022/pacs.008-malformed.xml
+kubectl -n mq logs -f ibm-mq-0
 ```
 
-Two things are wrong, both realistic:
-
-1. The root element opens as `<pacs:Document xmlns:pacs="...">` but
-   closes as `</Document>` - a namespace prefix was added on one side
-   of the tag and forgotten on the other. This is the same class of
-   XML-namespace mistake that trips people up when hand-editing or
-   templating ISO 20022 messages in Go, since `encoding/xml` requires
-   prefixes to match consistently between the marshaler config and the
-   struct tags.
-2. `<IntrBkSttlmAmt Ccy="USD">125.00</IntrBkSttlmAmt>` - the
-   interbank settlement amount - is missing entirely. Even if the
-   namespace mismatch were fixed, a real ISO 20022 schema validator
-   would reject this message for missing a mandatory field on the
-   credit transfer.
-
-**What just happened:** MQ guarantees delivery of bytes, not the
-validity of what is inside them. Message-level validation is the
-application's job, which is why real payment processors run schema
-validation immediately after `MQGET` and route anything that fails it
-to a dead-letter or exceptions queue rather than letting it flow
-further into the payment rail.
+**What just happened:** this is a queue manager-level rejection, not
+an application-level one - no consumer code ever ran and nothing
+landed on a dead-letter queue; the sender found out immediately via the
+`MQPUT` return code. That is a meaningfully different failure mode
+from a payload MQ happily delivers but a downstream parser rejects:
+here, the payment never left the building. Real payment gateways rely
+on `MAXMSGL` (or an equivalent size gate in front of MQ) for exactly
+this reason - reject oversized messages at the front door, where the
+sender can retry or split the payload, instead of letting them
+overrun the queue manager's own limits or complicate what a receiver
+has to handle.
 
 ---
 

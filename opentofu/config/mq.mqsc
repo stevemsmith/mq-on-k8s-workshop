@@ -55,10 +55,15 @@ SET CHLAUTH('APP.SVRCONN') +
 * ---------------------------------------------------------------------------
 
 * The local queue we will eventually read messages from.
+* MAXMSGL is capped at 4096 bytes (well below the 4 MB queue manager
+* default) to stand in for the message-size limits real payment
+* networks enforce - it gives us a queue-level MQPUT failure to
+* demonstrate without needing an oversized/invalid payload.
 DEFINE QLOCAL('APP.OUT') +
   DESCR('Application receive queue') +
   DEFPSIST(YES) +
   MAXDEPTH(5000) +
+  MAXMSGL(4096) +
   REPLACE
 
 * The alias the application writes to. Writes are silently redirected
