@@ -26,6 +26,7 @@ publicly available **IBM MQ Advanced for Developers** image as a base.
 │   └── dashboards/        # Grafana dashboards loaded via ConfigMap
 ├── certs/                 # OpenSSL script that produces the TLS material
 ├── client/                # Pod manifest and CCDT used for the end-to-end test
+├── iso20022/              # Sample pacs.008 payment messages (valid + malformed)
 └── README.md
 ```
 
@@ -44,6 +45,8 @@ make client       # Step 7 - start the mq-client pod
 make put          # send one message on APP.IN
 make get          # destructively read from APP.OUT
 make loop         # keep a persistent connection sending 1 msg/sec (^C to stop)
+make put-pacs008            # send a real ISO 20022 pacs.008 credit transfer
+make put-pacs008-malformed  # send a deliberately broken pacs.008
 make grafana      # port-forward Grafana to http://localhost:3000
 make prometheus   # port-forward Prometheus to http://localhost:9090
 ```
@@ -501,6 +504,109 @@ Within one scrape interval (~15 s) the following series populate:
 Refresh the **Channel Status** dashboard while the loop is running, then
 run a destructive `make get` and refresh **Queue Status** to see the
 get-side counters move.
+
+---
+
+## Step 8 - Put a real ISO 20022 payment message
+
+Everything so far has pushed arbitrary text through the queue. Since the
+whole point of this stack is standing in for a payments network hop
+(think RTP or FedNow), it is worth sending something that actually
+looks like a payment: an ISO 20022 `pacs.008.001.08`
+(`FIToFICustomerCreditTransfer`) message - the message type a bank
+sends to move a credit transfer to the next institution in the chain.
+
+`iso20022/pacs.008-valid.xml` is a hand-built but structurally correct
+sample of that message: a group header, one credit transfer
+transaction, debtor/creditor parties, and the agents (banks) routing
+it. `iso20022/pacs.008-malformed.xml` is the same message with two
+realistic mistakes seeded in.
+
+### Put the valid message
+
+`amqsputc` treats **each line of stdin as a separate message**, so a
+pretty-printed multi-line XML file would arrive as dozens of tiny,
+useless messages instead of one payment. Collapse it to a single line
+first:
+
+```bash
+tr -d '\n' < iso20022/pacs.008-valid.xml \
+  | kubectl -n mq exec -i mq-client -- amqsputc APP.IN qm1
+```
+
+> **Make shortcut:** `make put-pacs008`.
+
+Browse it back off `APP.OUT`:
+
+```bash
+kubectl -n mq exec -it mq-client -- amqsbcgc APP.OUT qm1
+```
+
+> **Make shortcut:** `make browse`.
+
+You are now looking at a real `pacs.008` payload flow through the same
+`APP.IN` (QALIAS) → `APP.OUT` (QLOCAL) hop used in Step 7 - the queue
+alias is doing the same job a payment gateway does when it hands a
+message off to the next hop without the sender needing to know the
+physical destination.
+
+### Put the malformed message
+
+```bash
+tr -d '\n' < iso20022/pacs.008-malformed.xml \
+  | kubectl -n mq exec -i mq-client -- amqsputc APP.IN qm1
+```
+
+> **Make shortcut:** `make put-pacs008-malformed`.
+
+MQ does not know or care what is inside the payload - it will accept
+and deliver this message exactly like the valid one. Browse it off
+`APP.OUT` to confirm it arrived intact:
+
+```bash
+kubectl -n mq exec -it mq-client -- amqsbcgc APP.OUT qm1
+```
+
+> **Make shortcut:** `make browse`.
+
+The bytes on the queue are identical to `iso20022/pacs.008-malformed.xml`,
+so the failure a downstream consumer would hit is easiest to reproduce
+by parsing that file directly - the same failure mode you'd see if a
+consumer app ran `xml.Unmarshal` (Go) or any other XML parser against
+the `MQGET`'d payload:
+
+```bash
+python3 -c "import xml.dom.minidom as m; m.parse('iso20022/pacs.008-malformed.xml')"
+```
+
+That raises `xml.parsers.expat.ExpatError: mismatched tag`. Diff the
+two files to see why:
+
+```bash
+diff iso20022/pacs.008-valid.xml iso20022/pacs.008-malformed.xml
+```
+
+Two things are wrong, both realistic:
+
+1. The root element opens as `<pacs:Document xmlns:pacs="...">` but
+   closes as `</Document>` - a namespace prefix was added on one side
+   of the tag and forgotten on the other. This is the same class of
+   XML-namespace mistake that trips people up when hand-editing or
+   templating ISO 20022 messages in Go, since `encoding/xml` requires
+   prefixes to match consistently between the marshaler config and the
+   struct tags.
+2. `<IntrBkSttlmAmt Ccy="USD">125.00</IntrBkSttlmAmt>` - the
+   interbank settlement amount - is missing entirely. Even if the
+   namespace mismatch were fixed, a real ISO 20022 schema validator
+   would reject this message for missing a mandatory field on the
+   credit transfer.
+
+**What just happened:** MQ guarantees delivery of bytes, not the
+validity of what is inside them. Message-level validation is the
+application's job, which is why real payment processors run schema
+validation immediately after `MQGET` and route anything that fails it
+to a dead-letter or exceptions queue rather than letting it flow
+further into the payment rail.
 
 ---
 

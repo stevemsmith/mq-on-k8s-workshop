@@ -135,6 +135,16 @@ browse: ## Browse messages on APP.OUT without removing them.
 get: ## Destructive read from APP.OUT.
 	$(KUBECTL) -n $(NAMESPACE) exec -it mq-client -- amqsgetc APP.OUT $(QMGR)
 
+.PHONY: put-pacs008
+put-pacs008: ## Put a real ISO 20022 pacs.008 credit-transfer message on APP.IN.
+	tr -d '\n' < iso20022/pacs.008-valid.xml \
+	  | $(KUBECTL) -n $(NAMESPACE) exec -i mq-client -- amqsputc APP.IN $(QMGR)
+
+.PHONY: put-pacs008-malformed
+put-pacs008-malformed: ## Put a deliberately malformed pacs.008 message on APP.IN.
+	tr -d '\n' < iso20022/pacs.008-malformed.xml \
+	  | $(KUBECTL) -n $(NAMESPACE) exec -i mq-client -- amqsputc APP.IN $(QMGR)
+
 .PHONY: loop
 loop: ## Stream 1 msg/sec into APP.IN over a persistent SVRCONN (^C to stop; needed for Channel Status).
 	@# One long-lived amqsputc process keeps the SVRCONN instance
