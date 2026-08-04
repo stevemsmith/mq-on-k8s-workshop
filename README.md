@@ -542,6 +542,156 @@ get-side counters move.
 
 ---
 
+## Step 8 - Dead-letter queue: decode the error header
+
+When IBM MQ cannot deliver a message to its destination it does not throw
+it away - it places it on the **dead-letter queue (DLQ)** wrapped in an
+**MQ dead-letter header (MQDLH)**. The header records *why* delivery
+failed as a numeric reason code. Tools like `amqsbcg` decode that code
+for you; the raw bytes on the wire do not, so this step is a chance to
+read the header by hand.
+
+One subtlety worth understanding first: a *local* `MQPUT` that fails
+(queue full, put-inhibited, …) just returns the reason code straight to
+the application - the message is **not** dead-lettered. Dead-lettering is
+done by the queue manager when it delivers on *your* behalf. The easiest
+way to trigger that on a single queue manager is publish/subscribe, so
+`mq.mqsc` defines:
+
+| Object | Type | Purpose |
+|---|---|---|
+| `DEAD.LETTER.QUEUE` | Local queue | The queue manager's DLQ (wired up with `ALTER QMGR DEADQ`) |
+| `DLQ.TARGET` | Local queue | A subscriber's destination, deliberately `PUT(DISABLED)` |
+| `DLQ.TOPIC` | Topic | Topic string `dlq/demo`, with `USEDLQ(YES)` so undeliverable publications are dead-lettered |
+| `DLQ.SUB` | Subscription | Durable admin subscription whose destination is `DLQ.TARGET` |
+| `DLQ.TEST` | Queue alias | An alias over `DLQ.TOPIC` (`TARGTYPE(TOPIC)`) - putting to it *publishes* |
+
+so a single put travels:
+
+```
+amqsput DLQ.TEST  ─►  DLQ.TOPIC (dlq/demo)  ─►  deliver to DLQ.SUB's dest
+                                                 DLQ.TARGET  [PUT(DISABLED)]
+                                              ─►  DEAD.LETTER.QUEUE
+                                                  (MQDLH, reason 2051)
+```
+
+> A sender/receiver channel "loopback" would *not* work here: a channel
+> name is unique per queue manager, so an inbound sender connection can
+> never find a receiver of the same name on the same qmgr. Publish/
+> subscribe dead-letters entirely locally, with no channel involved.
+
+### 8a. Produce a dead-lettered message
+
+The DLQ is an operator resource, so inspect it from the queue manager pod
+(server bindings, admin authority) rather than the `app` client. The MQ
+sample and control programs live under `/opt/mqm`:
+
+```bash
+kubectl -n mq exec ibm-mq-0 -- bash -lc '
+  export PATH=$PATH:/opt/mqm/bin:/opt/mqm/samp/bin
+  echo "hello dead letter" | amqsput DLQ.TEST qm1
+  printf "DISPLAY QLOCAL(DLQ.TARGET) CURDEPTH\nDISPLAY QLOCAL(DEAD.LETTER.QUEUE) CURDEPTH\n" \
+    | runmqsc qm1 | grep CURDEPTH'
+```
+
+`DLQ.TARGET` stays at `CURDEPTH(0)` (put is disabled) while
+`DEAD.LETTER.QUEUE` climbs to `CURDEPTH(1)` - the publication was
+dead-lettered.
+
+### 8b. Let MQ decode the header for you
+
+```bash
+kubectl -n mq exec ibm-mq-0 -- bash -lc \
+  'export PATH=$PATH:/opt/mqm/samp/bin; amqsbcg DEAD.LETTER.QUEUE qm1'
+```
+
+`amqsbcg` recognises the `MQDEAD` format and prints a decoded
+**Dead Letter Header** block:
+
+```
+  StrucId  : 'DLH '  Version : 1
+  Reason   : 2051 [MQRC_PUT_INHIBITED]
+  DestQName      : 'DLQ.TARGET                                      '
+```
+
+### 8c. Decode the hex yourself
+
+The convenience of `amqsbcg` hides what is actually stored. Dump the same
+message as raw bytes with `dmpmqmsg`, which treats the MQDLH as ordinary
+message data (`-d N` suppresses the MQMD, `-d a` adds an ASCII column):
+
+```bash
+kubectl -n mq exec ibm-mq-0 -- bash -lc \
+  'export PATH=$PATH:/opt/mqm/bin; dmpmqmsg -m qm1 -i DEAD.LETTER.QUEUE -d aN -f stdout' \
+  | grep '^X '
+```
+
+The first line is the start of the MQDLH:
+
+```
+X 444C48200100000003080000444C512E54415247455420...  <DLH ........DLQ.TARGET   >
+```
+
+Walk the `MQDLH` structure (defined in IBM MQ's `cmqc.h`) byte by byte:
+
+| Offset | Bytes | Field | Meaning |
+|---|---|---|---|
+| 0 | `44 4C 48 20` | `StrucId` | ASCII `"DLH "` |
+| 4 | `01 00 00 00` | `Version` | 1 |
+| **8** | **`03 08 00 00`** | **`Reason`** | **the error code** |
+| 12 | `44 4C 51 2E …` | `DestQName` | ASCII `"DLQ.TARGET"` (padded to 48) |
+
+The `Reason` field is a 4-byte `MQLONG`. Earlier in the header the
+`Encoding` field is `0x00000222` (`MQENC_NATIVE` on this amd64 pod), which
+means integers are **little-endian** - so read the four bytes in reverse:
+
+```
+bytes on the wire : 03 08 00 00
+reversed (LE)     : 00 00 08 03   →   0x00000803
+hex → decimal     : 0x803 = 8×256 + 3 = 2051
+```
+
+Resolve `2051` with the `mqrc` utility (it accepts decimal or hex):
+
+```bash
+kubectl -n mq exec ibm-mq-0 -- /opt/mqm/bin/mqrc 0x803
+#       2051  0x00000803  MQRC_PUT_INHIBITED
+```
+
+**`MQRC_PUT_INHIBITED`** - the queue manager could not deliver the
+publication because `DLQ.TARGET` (the ASCII name immediately after the
+reason code) is `PUT(DISABLED)`.
+
+### 8d. Try a different reason code
+
+To decode a different hex value, make delivery to `DLQ.TARGET` fail a
+different way. Apply the change directly with `runmqsc` (editing
+`mq.mqsc` + `make reload-mqsc` re-runs the whole mounted file, so a
+one-off `ALTER` is simpler here). For example, force a **queue-full**
+failure - enable puts but cap the depth at one, then publish twice:
+
+```bash
+kubectl -n mq exec ibm-mq-0 -- bash -lc '
+  export PATH=$PATH:/opt/mqm/bin:/opt/mqm/samp/bin
+  printf "CLEAR QLOCAL(DEAD.LETTER.QUEUE)\nALTER QLOCAL(DLQ.TARGET) PUT(ENABLED) MAXDEPTH(1)\nCLEAR QLOCAL(DLQ.TARGET)\n" | runmqsc qm1 >/dev/null
+  echo "msg one" | amqsput DLQ.TEST qm1 >/dev/null   # fills DLQ.TARGET
+  echo "msg two" | amqsput DLQ.TEST qm1 >/dev/null   # overflows -> dead-lettered
+  amqsbcg DEAD.LETTER.QUEUE qm1 | grep "Reason "'
+#   Reason   : 2053 [MQRC_Q_FULL]
+```
+
+Repeat 8c on this message and you will find `05 08 00 00` at offset 8 -
+little-endian `0x00000805` = **2053** = `MQRC_Q_FULL`.
+
+Restore the queue to its shipped state when you are done:
+
+```bash
+kubectl -n mq exec ibm-mq-0 -- bash -lc '
+  printf "CLEAR QLOCAL(DLQ.TARGET)\nCLEAR QLOCAL(DEAD.LETTER.QUEUE)\nALTER QLOCAL(DLQ.TARGET) PUT(DISABLED) MAXDEPTH(5000)\n" | runmqsc qm1'
+```
+
+---
+
 ## Cleanup
 
 ```bash

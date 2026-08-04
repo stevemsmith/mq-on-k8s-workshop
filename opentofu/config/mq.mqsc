@@ -104,4 +104,72 @@ DEFINE SERVICE(MQPROMETHEUS) +
   REPLACE
 START SERVICE(MQPROMETHEUS)
 
+* ---------------------------------------------------------------------------
+* Dead-letter queue demonstration (publish/subscribe)
+* ---------------------------------------------------------------------------
+* A failing local MQPUT just returns a reason code to the application - the
+* message is NOT dead-lettered. Dead-lettering happens when the QUEUE MANAGER
+* (or a channel MCA) cannot deliver a message to its destination queue.
+*
+* On a single queue manager the simplest way to trigger that is publish/
+* subscribe: when a publication cannot be delivered to a subscriber's queue,
+* and the topic has USEDLQ(YES), the queue manager moves it to the DLQ.
+*
+*   amqsput DLQ.TEST (QALIAS -> TOPIC dlq/demo)
+*        -> queue manager tries to deliver the publication to DLQ.SUB's
+*           destination queue DLQ.TARGET, which is PUT(DISABLED)
+*        -> delivery fails, so the message goes to DEAD.LETTER.QUEUE with an
+*           MQDLH header carrying reason 2051 (MQRC_PUT_INHIBITED).
+*
+* Verify with:   amqsbcg DEAD.LETTER.QUEUE qm1
+* and look for  Reason : 2051  and  DestQName : DLQ.TARGET  in the header.
+*
+* NOTE: a sender/receiver "loopback" on one queue manager does NOT work -
+* the sender requests its own channel name at the partner, and a channel
+* name is unique per QM, so the inbound connection can never find a receiver.
+
+* The dead-letter queue, and point the queue manager at it.
+DEFINE QLOCAL('DEAD.LETTER.QUEUE') +
+  DESCR('Dead-letter queue') +
+  MAXDEPTH(5000) +
+  REPLACE
+ALTER QMGR DEADQ('DEAD.LETTER.QUEUE')
+
+* The subscriber's destination queue - deliberately put-disabled so that
+* every publication delivered to it fails and is dead-lettered.
+DEFINE QLOCAL('DLQ.TARGET') +
+  DESCR('Subscriber queue, put-disabled on purpose') +
+  PUT(DISABLED) +
+  REPLACE
+
+* The topic. USEDLQ(YES) tells the QM to dead-letter publications that
+* cannot be delivered to a subscriber (rather than discarding them).
+DEFINE TOPIC('DLQ.TOPIC') +
+  DESCR('Topic for the dead-letter demo') +
+  TOPICSTR('dlq/demo') +
+  USEDLQ(YES) +
+  REPLACE
+
+* A durable, administratively-defined subscription whose destination is the
+* put-disabled queue. It exists without any subscribing application, so a
+* single publish is enough to trigger the undeliverable-message path.
+DEFINE SUB('DLQ.SUB') +
+  DESCR('Subscription pointing at the put-disabled queue') +
+  TOPICSTR('dlq/demo') +
+  DEST('DLQ.TARGET') +
+  REPLACE
+
+* The queue name the application puts to. It is an alias over the topic,
+* so an ordinary MQPUT (e.g. amqsput) becomes a publish.
+DEFINE QALIAS('DLQ.TEST') +
+  DESCR('Alias over DLQ.TOPIC - putting here publishes to dlq/demo') +
+  TARGET('DLQ.TOPIC') +
+  TARGTYPE(TOPIC) +
+  REPLACE
+
+* Let the "app" principal publish to the topic (needed when driving the
+* demo from the client pod; not required when running amqsput on the QM pod).
+SET AUTHREC PROFILE('DLQ.TOPIC') PRINCIPAL('app') OBJTYPE(TOPIC) +
+  AUTHADD(PUB)
+
 REFRESH SECURITY TYPE(CONNAUTH)
