@@ -8,4 +8,6 @@ docker/.image-stamp
 docker/mq-container/
 docker/mq-metric-samples/
 docker/mq_prometheus
+docker/amqspoisonc
+docker/poison-consumer/MQINST/
 opentofu/.deploy-stamp

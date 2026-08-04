@@ -21,6 +21,7 @@ publicly available **IBM MQ Advanced for Developers** image as a base.
 .
 ├── Makefile               # top-level entry point wrapping every step
 ├── docker/                # build.sh (arch-aware) + Dockerfile + scripts to build moov-mq:local
+│   └── poison-consumer/   # amqspoison.c - poison-message/DLQ demo consumer
 ├── opentofu/              # OpenTofu config that deploys MQ, Prometheus, Grafana
 │   ├── config/            # mq.mqsc and mq.ini mounted into the qmgr pod
 │   └── dashboards/        # Grafana dashboards loaded via ConfigMap
@@ -47,6 +48,9 @@ make get          # destructively read from APP.OUT
 make loop         # keep a persistent connection sending 1 msg/sec (^C to stop)
 make put-pacs008            # send a real ISO 20022 pacs.008 credit transfer
 make put-pacs008-oversized  # send a pacs.008 that exceeds MAXMSGL - MQ rejects the MQPUT
+make put-poison             # put a message on APP.POISON for the dead-letter-queue exercise
+make run-poison-consumer    # back it out until BOTHRESH reroutes it to the DLQ
+make browse-dlq             # see it land on DEV.DEAD.LETTER.QUEUE with an MQDLH header
 make grafana      # port-forward Grafana to http://localhost:3000
 make prometheus   # port-forward Prometheus to http://localhost:9090
 ```
@@ -281,7 +285,8 @@ The file is run once when the queue manager is created and sets up:
 | `CHLAUTH('APP.SVRCONN' SSLPEERMAP)` | Channel auth rule | Maps any client with `CN=mq-client` to the local user `app` |
 | `APP.IN` | Queue alias | What the application writes to |
 | `APP.OUT` | Local queue | What the application reads from; `APP.IN`'s alias target. `MAXMSGL(4096)` caps how big a message it will accept - see Step 8 |
-| `AUTHREC` records | Authorisations | `app` gets `PUT` on `APP.IN`, `GET` on `APP.OUT`, plus `CONNECT` on the qmgr |
+| `APP.POISON` | Local queue | Demo queue for the poison-message/DLQ exercise. `BOTHRESH(3)` + `BOQNAME('DEV.DEAD.LETTER.QUEUE')` - see Step 9 |
+| `AUTHREC` records | Authorisations | `app` gets `PUT` on `APP.IN`/`APP.POISON`, `GET` on `APP.OUT`, `PUT`+`GET` on `APP.POISON`/`DEV.DEAD.LETTER.QUEUE`, plus `CONNECT` on the qmgr |
 | `MQPROMETHEUS` | Service | Starts `mq_prometheus.sh` so the exporter listens on `:9158` |
 
 A message therefore travels:
@@ -638,6 +643,126 @@ this reason - reject oversized messages at the front door, where the
 sender can retry or split the payload, instead of letting them
 overrun the queue manager's own limits or complicate what a receiver
 has to handle.
+
+---
+
+## Step 9 - Poison messages and the dead-letter queue
+
+The two failures above both happen at `MQPUT` time - the message
+never gets accepted onto a queue at all. This step is different: the
+message is accepted just fine, but the *consumer* can never process it
+successfully. That's the "poison message" problem, and it's what a
+dead-letter queue (DLQ) is for.
+
+**Important nuance the exercise is built around:** IBM MQ does **not**
+automatically move a repeatedly-backed-out message to the dead-letter
+queue. `BOTHRESH` (backout threshold) and `BOQNAME` (backout requeue
+name) are just queue attributes the queue manager exposes for a
+*consuming application* to read and act on - it's the consumer's job
+to notice `MQMD.BackoutCount` has reached `BOTHRESH` and explicitly
+reroute the message itself. `opentofu/config/mq.mqsc` defines a demo
+queue with this configured:
+
+```mqsc
+DEFINE QLOCAL('APP.POISON') BOTHRESH(3) BOQNAME('DEV.DEAD.LETTER.QUEUE') ...
+```
+
+`DEV.DEAD.LETTER.QUEUE` is the dead-letter queue the MQ Advanced for
+Developers default configuration already sets as this queue manager's
+`DEADQ` (confirm with `DISPLAY QMGR DEADQ` via `runmqsc`).
+
+### The consumer
+
+None of the IBM sample programs (`amqsget`, `amqsbcg`, ...) do
+syncpoint gets or backout, so this exercise ships a small custom C
+program, `docker/poison-consumer/amqspoison.c`, built into
+`moov-mq:local` as `amqspoisonc` by `docker/build-poison-consumer.sh`
+(there's no compiler or MQ headers in the runtime image, so it's
+compiled in a separate builder stage that installs the MQ client SDK -
+see that Dockerfile for how arm64/amd64 are handled, mirroring the
+`mq_prometheus` exporter build).
+
+It simulates a consumer that can never process a message: it reads
+`APP.POISON`'s own `BOTHRESH`/`BOQNAME` via `MQINQ`, then repeatedly
+`MQGET`s the same message under syncpoint. While `BackoutCount` is
+still below `BOTHRESH`, it calls `MQBACK` (simulating "processing
+failed, try again later") and moves on to the next attempt. Once
+`BackoutCount` reaches `BOTHRESH`, instead of backing out again, it
+wraps the message in an `MQDLH` (dead-letter header - the same
+structure the `amqsdlq` sample and the DLQ convention expect),
+`MQPUT`s that onto `BOQNAME`, and `MQCOMMIT`s - atomically removing
+the message from `APP.POISON` and placing it on the DLQ in one unit of
+work.
+
+### Run it
+
+Put a message that will never be processed successfully:
+
+```bash
+kubectl -n mq exec -i mq-client -- bash -c \
+  'echo "a message no consumer can ever process" | amqsputc APP.POISON qm1'
+```
+
+> **Make shortcut:** `make put-poison`.
+
+Run the consumer against it:
+
+```bash
+kubectl -n mq exec -it mq-client -- amqspoisonc APP.POISON qm1
+```
+
+> **Make shortcut:** `make run-poison-consumer`.
+
+You should see the `BackoutCount` climb with each attempt, then the
+reroute once it reaches the threshold:
+
+```
+source queue BOTHRESH=3 BOQNAME='DEV.DEAD.LETTER.QUEUE...'
+attempt 1: got message, BackoutCount=0 (BOTHRESH=3)
+attempt 2: got message, BackoutCount=1 (BOTHRESH=3)
+attempt 3: got message, BackoutCount=2 (BOTHRESH=3)
+attempt 4: got message, BackoutCount=3 (BOTHRESH=3)
+attempt 4: BackoutCount has reached BOTHRESH - rerouting to 'DEV.DEAD.LETTER.QUEUE...' instead of processing it again
+attempt 4: committed - message moved to 'DEV.DEAD.LETTER.QUEUE...'
+```
+
+Browse the DLQ to see it land there:
+
+```bash
+kubectl -n mq exec -it mq-client -- amqsbcgc DEV.DEAD.LETTER.QUEUE qm1
+```
+
+> **Make shortcut:** `make browse-dlq`.
+
+`amqsbcgc` shows the message wrapped in an `MQDLH` structure ahead of
+the original payload:
+
+```
+****Dead Letter Header****
+
+  StrucId  : 'DLH '  Version : 1
+  Reason   : 2362 [MQRC_BACKOUT_THRESHOLD_REACHED]
+  DestQName      : 'APP.POISON'
+  DestQMgrName   : 'qm1'
+  Format : 'MQSTR   '
+...
+****   Message      ****
+
+ length - 38 of 38 bytes
+ 6120 6D65 7373 6167 6520 6E6F 2063 6F6E 'a message no con'
+ ...
+```
+
+**What just happened:** `Reason: 2362` (`MQRC_BACKOUT_THRESHOLD_REACHED`)
+and `DestQName: APP.POISON` are exactly what let a downstream operator
+(or the IBM-supplied `amqsdlq` handler) figure out *why* this message
+ended up here and *where* it came from - information that would
+otherwise be lost the moment a message leaves its original queue. This
+is the production pattern real payment infrastructure relies on:
+poison messages don't get silently dropped or retried forever: they're
+quarantined, tagged with the reason, and left for a human or a
+remediation process to inspect - the payments equivalent of a returned
+or repaired transaction rather than one that just vanishes.
 
 ---
 

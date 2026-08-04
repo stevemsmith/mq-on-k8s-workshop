@@ -5,9 +5,10 @@
 #
 # Removes:
 #   - the mq_prometheus binary
+#   - the amqspoisonc binary and its staged arm64 MQINST/ archive
 #   - the cloned mq-metric-samples/ source tree
 #   - the cloned mq-container/ source tree (arm64 only)
-#   - the throwaway mqprom:* builder images
+#   - the throwaway mqprom:* and poisonbuild:* builder images
 #   - the moov-mq:local image
 #   - any locally-built ibm-mqadvanced-server-dev:*-arm64 base images
 
@@ -15,13 +16,13 @@ set -eu
 cd "$(dirname "$0")"
 
 echo ">>> Removing build artifacts under $(pwd)"
-rm -rf mq-metric-samples mq-container mq_prometheus
+rm -rf mq-metric-samples mq-container mq_prometheus amqspoisonc poison-consumer/MQINST
 
-# Any mqprom builder tags (mqprom:amd64, mqprom:arm64, mqprom:latest ...)
+# Any mqprom / poisonbuild builder tags
 mqprom_images=$(docker images --format '{{.Repository}}:{{.Tag}}' \
-  | grep -E '^mqprom:' || true)
+  | grep -E '^(mqprom|poisonbuild):' || true)
 if [ -n "$mqprom_images" ]; then
-  echo ">>> Removing mqprom builder images"
+  echo ">>> Removing mqprom/poisonbuild builder images"
   echo "$mqprom_images" | xargs -n1 docker rmi -f
 fi
 

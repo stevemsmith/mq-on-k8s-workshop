@@ -14,4 +14,8 @@ COPY mq_prometheus      /usr/local/bin/mq_prometheus
 COPY mq_prometheus.sh   /usr/local/bin/mq_prometheus.sh
 RUN  chmod +x /usr/local/bin/mq_prometheus /usr/local/bin/mq_prometheus.sh
 
+# install the poison-message/DLQ demo consumer built by build-poison-consumer.sh
+COPY amqspoisonc        /usr/local/bin/amqspoisonc
+RUN  chmod +x /usr/local/bin/amqspoisonc
+
 USER 1001

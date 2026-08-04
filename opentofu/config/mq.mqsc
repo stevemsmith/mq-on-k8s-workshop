@@ -78,6 +78,18 @@ DEFINE QALIAS('APP.IN') +
   GET(ENABLED) +
   REPLACE
 
+* A queue for the poison-message/dead-letter-queue exercise. BOTHRESH(3)
+* means a consumer can back a message out at most 3 times under
+* syncpoint before the queue manager itself reroutes the message to
+* BOQNAME instead of redelivering it - see docker/poison-consumer/ and
+* the "Poison messages and the dead-letter queue" README section.
+DEFINE QLOCAL('APP.POISON') +
+  DESCR('Poison-message demo queue - see amqspoisonc') +
+  DEFPSIST(YES) +
+  BOTHRESH(3) +
+  BOQNAME('DEV.DEAD.LETTER.QUEUE') +
+  REPLACE
+
 * ---------------------------------------------------------------------------
 * Authorisations for the "app" principal
 * ---------------------------------------------------------------------------
@@ -89,6 +101,13 @@ SET AUTHREC PROFILE('APP.IN')  PRINCIPAL('app') OBJTYPE(QUEUE) +
   AUTHADD(PUT,INQ,BROWSE)
 SET AUTHREC PROFILE('APP.OUT') PRINCIPAL('app') OBJTYPE(QUEUE) +
   AUTHADD(GET,INQ,BROWSE)
+SET AUTHREC PROFILE('APP.POISON') PRINCIPAL('app') OBJTYPE(QUEUE) +
+  AUTHADD(PUT,GET,INQ,BROWSE)
+* PUT is required here too: amqspoisonc is the one that reroutes a
+* poison message onto the DLQ once BOTHRESH is reached (the queue
+* manager does not do this automatically - see docker/poison-consumer/).
+SET AUTHREC PROFILE('DEV.DEAD.LETTER.QUEUE') PRINCIPAL('app') OBJTYPE(QUEUE) +
+  AUTHADD(PUT,GET,INQ,BROWSE)
 
 * ---------------------------------------------------------------------------
 * Prometheus exporter service

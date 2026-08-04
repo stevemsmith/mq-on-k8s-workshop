@@ -10,7 +10,8 @@
 #               recommends because IBM does not publish an arm64 image:
 #               https://github.com/ibm-messaging/mq-container/issues/562
 # 3. Build the mq_prometheus exporter for that architecture.
-# 4. Build the final moov-mq:local image.
+# 4. Build the amqspoisonc poison-message/DLQ demo consumer.
+# 5. Build the final moov-mq:local image.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -74,7 +75,12 @@ fi
 ./build-mq-prometheus.sh "$TARGETARCH"
 
 # ---------------------------------------------------------------------------
-# 4. Final image
+# 4. Poison-message/DLQ demo consumer
+# ---------------------------------------------------------------------------
+./build-poison-consumer.sh "$TARGETARCH"
+
+# ---------------------------------------------------------------------------
+# 5. Final image
 # ---------------------------------------------------------------------------
 docker buildx build --load \
   --platform "linux/${TARGETARCH}" \

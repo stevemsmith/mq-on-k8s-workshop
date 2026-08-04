@@ -58,7 +58,10 @@ image: $(IMAGE_STAMP) ## Build moov-mq:local (arch-aware; may build an arm64 bas
 $(IMAGE_STAMP): $(DOCKER_DIR)/Dockerfile \
                 $(DOCKER_DIR)/build.sh \
                 $(DOCKER_DIR)/build-mq-prometheus.sh \
-                $(DOCKER_DIR)/mq_prometheus.sh
+                $(DOCKER_DIR)/mq_prometheus.sh \
+                $(DOCKER_DIR)/build-poison-consumer.sh \
+                $(DOCKER_DIR)/poison-consumer/Dockerfile \
+                $(DOCKER_DIR)/poison-consumer/amqspoison.c
 	cd $(DOCKER_DIR) && ./build.sh
 	@touch $@
 
@@ -144,6 +147,22 @@ put-pacs008: ## Put a real ISO 20022 pacs.008 credit-transfer message on APP.IN.
 put-pacs008-oversized: ## Put a pacs.008 message that exceeds APP.OUT's MAXMSGL - MQ refuses the MQPUT.
 	tr -d '\n' < iso20022/pacs.008-oversized.xml \
 	  | $(KUBECTL) -n $(NAMESPACE) exec -i mq-client -- amqsputc APP.IN $(QMGR)
+
+# ---------------------------------------------------------------------------
+# Poison messages and the dead-letter queue
+# ---------------------------------------------------------------------------
+.PHONY: put-poison
+put-poison: ## Put one message on APP.POISON for the poison-message/DLQ exercise.
+	$(KUBECTL) -n $(NAMESPACE) exec -i mq-client -- bash -c \
+	  'echo "a message no consumer can ever process" | amqsputc APP.POISON $(QMGR)'
+
+.PHONY: run-poison-consumer
+run-poison-consumer: ## Run amqspoisonc against APP.POISON (backs the message out until BOTHRESH reroutes it to the DLQ).
+	$(KUBECTL) -n $(NAMESPACE) exec -it mq-client -- amqspoisonc APP.POISON $(QMGR)
+
+.PHONY: browse-dlq
+browse-dlq: ## Browse DEV.DEAD.LETTER.QUEUE without removing messages.
+	$(KUBECTL) -n $(NAMESPACE) exec -it mq-client -- amqsbcgc DEV.DEAD.LETTER.QUEUE $(QMGR)
 
 .PHONY: loop
 loop: ## Stream 1 msg/sec into APP.IN over a persistent SVRCONN (^C to stop; needed for Channel Status).
