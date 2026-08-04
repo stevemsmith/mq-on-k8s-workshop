@@ -6,6 +6,7 @@
 #   make put get    # send one message; read it back
 #   make loop       # push 200 messages through the SDR/RCVR pair
 #   make grafana    # open Grafana on http://localhost:3000
+#   make console    # open the MQ Web Console on https://localhost:9443
 #   make clean      # tear down everything, back to a fresh checkout
 #
 # Overridable variables:
@@ -155,6 +156,10 @@ grafana: ## Port-forward Grafana to http://localhost:3000 (admin/admin).
 .PHONY: prometheus
 prometheus: ## Port-forward Prometheus to http://localhost:9090.
 	$(KUBECTL) -n $(NAMESPACE) port-forward svc/prometheus 9090:9090
+
+.PHONY: console
+console: ## Port-forward the MQ Web Console to https://localhost:9443/ibmmq/console (admin/workshopadmin1).
+	$(KUBECTL) -n $(NAMESPACE) port-forward svc/ibm-mq 9443:9443
 
 # ---------------------------------------------------------------------------
 # Diagnostics

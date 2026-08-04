@@ -214,6 +214,7 @@ custom modules. The resources created are:
 | `kubernetes_config_map.mq_prometheus` | Lists which queues / channels the exporter scrapes |
 | `kubernetes_secret.qmgr_tls` | The queue manager's own TLS key + cert (mounted at `/etc/mqm/pki/keys/default`) |
 | `kubernetes_secret.client_ca` | The CA that signed the application client cert (mounted into the qmgr trust store at `/etc/mqm/pki/trust/0`) |
+| `kubernetes_secret.mq_admin_password` | Password for the MQ Web Console's `admin` user (mounted at `/run/secrets/mqAdminPassword`) |
 | `kubernetes_service.qmgr` | ClusterIP service exposing 1414 (qmgr) and 9443 (web console) |
 | `kubernetes_service.mq_prometheus` | ClusterIP service exposing 9158 (Prometheus exporter) |
 | `kubernetes_deployment.prometheus` / `kubernetes_service.prometheus` | Prometheus instance scraping the `mq-prometheus` service |
@@ -405,6 +406,43 @@ the dashboard panel queries filter on `k8s_instance="[[instance]]"`.
 
 If you want to populate the dashboards with non-zero data, run the
 client steps below and refresh.
+
+### Open the MQ Web Console
+
+Grafana shows you metrics, but sometimes you just want to click on a
+queue and look at what's on it. IBM MQ ships a browser-based admin UI
+for exactly that - it's a much friendlier way to poke around than
+MQ Explorer or `runmqsc`, and needs nothing installed locally.
+
+The queue manager container starts the console by default; the only
+thing missing out of the box is a login. `opentofu/main.tf` creates a
+`mq-admin-password` Secret from the `mq_admin_password` variable
+(default `workshopadmin1` - a workshop-only value, not meant to be
+reused anywhere real) and mounts it at
+`/run/secrets/mqAdminPassword`, which is where `mq-container` reads
+the `admin` user's password from (the older `MQ_ADMIN_PASSWORD` env
+var was deprecated in MQ 9.4).
+
+```bash
+kubectl -n mq port-forward svc/ibm-mq 9443:9443 &
+open https://localhost:9443/ibmmq/console
+```
+
+> **Make shortcut:** `make console` — foreground port-forward, ^C to
+> exit.
+
+Accept the self-signed certificate warning (the console generates its
+own cert, unrelated to the client TLS material from Step 2), then log
+in as:
+
+- **User:** `admin`
+- **Password:** `workshopadmin1` (or whatever you set
+  `mq_admin_password` to in `terraform.tfvars`)
+
+From **Manage → Queue managers → qm1 → Queues** you can see live
+queue depth, browse message payloads without the CLI, and PUT a test
+message from the browser - handy for a workshop audience that's more
+comfortable clicking around than typing `runmqsc` commands.
 
 ---
 
