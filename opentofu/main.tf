@@ -84,6 +84,21 @@ resource "kubernetes_secret" "client_ca" {
   }
 }
 
+resource "kubernetes_secret" "mq_admin_password" {
+  metadata {
+    name      = "mq-admin-password"
+    namespace = kubernetes_namespace.mq.metadata[0].name
+    labels    = local.labels
+  }
+  data = {
+    # mq-container reads this file to set the 'admin' user's password for
+    # the MQ Web Console. Filename must match exactly - it's read from
+    # /run/secrets/mqAdminPassword, not from an env var (MQ_ADMIN_PASSWORD
+    # was deprecated in MQ 9.4).
+    "mqAdminPassword" = var.mq_admin_password
+  }
+}
+
 ##############################################################################
 # Services
 ##############################################################################
@@ -222,6 +237,14 @@ resource "kubernetes_stateful_set" "qmgr" {
             read_only  = true
           }
 
+          # Password for the Web Console's 'admin' user.
+          volume_mount {
+            name       = "mq-admin-password"
+            mount_path = "/run/secrets/mqAdminPassword"
+            sub_path   = "mqAdminPassword"
+            read_only  = true
+          }
+
           # mq_prometheus.sh reads its queue / channel patterns from here.
           volume_mount {
             name       = "mq-prometheus"
@@ -293,6 +316,12 @@ resource "kubernetes_stateful_set" "qmgr" {
               key  = "ca.crt"
               path = "tls.crt"
             }
+          }
+        }
+        volume {
+          name = "mq-admin-password"
+          secret {
+            secret_name = kubernetes_secret.mq_admin_password.metadata[0].name
           }
         }
       }

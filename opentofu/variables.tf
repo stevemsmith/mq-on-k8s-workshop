@@ -27,3 +27,10 @@ variable "certs_dir" {
   description = "Local directory containing TLS materials produced by ../certs/create-certs.sh"
   default     = "../certs/out"
 }
+
+variable "mq_admin_password" {
+  type        = string
+  description = "Password for the 'admin' user in the IBM MQ Web Console. Workshop-only value, not a real secret - do not reuse this pattern outside a local tutorial."
+  default     = "workshopadmin1"
+  sensitive   = true
+}
